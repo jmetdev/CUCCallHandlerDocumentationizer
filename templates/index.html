@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Call Handler Export - SSE (Tabler Edition)</title>
+
+  <!-- Tabler CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/@tabler/core@1.0.0-alpha.24/dist/css/tabler.min.css"
+  >
+</head>
+<body>
+  <div class="page">
+    <div class="container my-4">
+
+      <h1>Export Non-Primary Call Handlers</h1>
+      <p class="text-muted">
+        Enter your Cisco Unity Connection credentials, then click "Start Export". Once complete you can download the CSV file or choose to have PDF images generated.
+      </p>
+
+      <!-- Inputs row -->
+      <div class="row g-2 mb-3">
+        <div class="col-sm-6 col-md-4">
+          <label for="base_url" class="form-label">Base URL</label>
+          <input
+            type="text"
+            class="form-control"
+            id="base_url"
+            placeholder="Hostname or IP Address of Unity Connection"
+            required
+          >
+        </div>
+        <div class="col-sm-6 col-md-4">
+          <label for="username" class="form-label">Username</label>
+          <input
+            type="text"
+            class="form-control"
+            id="username"
+            required
+          >
+        </div>
+        <div class="col-sm-6 col-md-4">
+          <label for="password" class="form-label">Password</label>
+          <input
+            type="password"
+            class="form-control"
+            id="password"
+            required
+          >
+        </div>
+      </div>
+
+      <!-- Start Export Button -->
+      <button id="start-btn" class="btn btn-primary mb-3">Start Export</button>
+
+      <!-- Progress area (hidden initially) -->
+      <div id="progress-area" style="display:none;">
+        <div class="progress mb-2" style="height: 20px;">
+          <div
+            id="progress-bar"
+            class="progress-bar"
+            style="width: 0%; transition: width 0.5s;"
+          ></div>
+        </div>
+        <div id="progress-text" class="text-muted">Starting...</div>
+      </div>
+
+      <!-- Where final link or error goes -->
+      <div id="result" class="mt-3"></div>
+
+      <hr />
+
+      <!--
+        Optional: If you want the "Generate Graphs" feature,
+        here's an input to hold the CSV filename
+      -->
+      <div class="mb-3">
+        <label for="csv_filename" class="form-label">CSV Filename (Generated)</label>
+        <input
+          type="text"
+          class="form-control"
+          id="csv_filename"
+          placeholder="Will be filled automatically after export"
+          readonly
+        >
+      </div>
+      <button id="generate-graphs-btn" class="btn btn-secondary mb-3" disabled>
+        Generate Graphs from CSV
+      </button>
+
+      <!-- Graph results appear here -->
+      <div id="graph-results" class="mt-4"></div>
+
+    </div>
+  </div>
+
+  <!-- Tabler JS (optional, for certain components) -->
+  <script src="https://unpkg.com/@tabler/core@1.0.0-alpha.24/dist/js/tabler.min.js"></script>
+
+  <script>
+    // 1) SSE logic
+    document.getElementById('start-btn').addEventListener('click', function() {
+      const baseURL = document.getElementById('base_url').value.trim();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+
+      if (!baseURL || !username || !password) {
+        alert("Please fill out Base URL, Username, and Password.");
+        return;
+      }
+
+      // Reset UI
+      document.getElementById('result').innerHTML = "";
+      document.getElementById('csv_filename').value = "";
+      document.getElementById('generate-graphs-btn').disabled = true;
+      const progressArea = document.getElementById('progress-area');
+      progressArea.style.display = "block";
+      document.getElementById('progress-text').innerText = "Starting...";
+      const progressBar = document.getElementById('progress-bar');
+      progressBar.style.width = "0%";
+      progressBar.classList.remove("bg-danger");
+
+      // Build SSE URL with query params
+      const sseUrl = `/run_export_sse?base_url=${encodeURIComponent(baseURL)}`
+                   + `&username=${encodeURIComponent(username)}`
+                   + `&password=${encodeURIComponent(password)}`;
+
+      const evtSource = new EventSource(sseUrl);
+
+      evtSource.addEventListener("progress", function(e) {
+        // e.data might be "5,228" => (processed_count, total_count)
+        const [processed, total] = e.data.split(",");
+        const p = parseInt(processed) || 0;
+        const t = parseInt(total) || 0;
+        document.getElementById('progress-text').innerText = `Processed ${p} of ${t}...`;
+
+        if (t > 0) {
+          const percent = (p / t) * 100;
+          progressBar.style.width = percent + "%";
+        }
+      });
+
+      evtSource.addEventListener("done", function(e) {
+        evtSource.close();
+        const csvFile = e.data;
+        document.getElementById('progress-text').innerText = "Done!";
+        progressBar.style.width = "100%";
+
+        document.getElementById('result').innerHTML = `
+          <div class="alert alert-success">
+            Export complete!
+            <a href="/download_csv/${csvFile}" target="_blank">Download CSV</a>
+          </div>
+        `;
+        // Store CSV file so we can generate graphs
+        document.getElementById('csv_filename').value = csvFile;
+        document.getElementById('generate-graphs-btn').disabled = false;
+      });
+
+      evtSource.addEventListener("error", function(e) {
+        evtSource.close();
+        document.getElementById('progress-text').innerText = "Error!";
+        progressBar.style.width = "0%";
+        progressBar.classList.add("bg-danger");
+
+        document.getElementById('result').innerHTML = `
+          <div class="alert alert-danger">
+            An error occurred: ${e.data}
+          </div>
+        `;
+      });
+    });
+
+    // 2) Generate Graphs logic
+    document.getElementById('generate-graphs-btn').addEventListener('click', function() {
+      const csvFile = document.getElementById('csv_filename').value.trim();
+      if (!csvFile) {
+        alert("No CSV file name found!");
+        return;
+      }
+
+      const resultsDiv = document.getElementById('graph-results');
+      resultsDiv.innerHTML = `
+        <div class="alert alert-info">Generating Graphs... please wait.</div>
+      `;
+
+      fetch(`/generate_graphs?csv_filename=${encodeURIComponent(csvFile)}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.error) {
+            resultsDiv.innerHTML = `
+              <div class="alert alert-danger">
+                Error generating graphs: ${data.error}
+              </div>
+            `;
+            return;
+          }
+
+          let html = `<div class="alert alert-success">Graphs generated successfully!</div>`;
+
+          if (data.merged_pdf) {
+  html += `
+    <div class="card mb-3 w-100">
+      <div class="card-body">
+        <div class="row align-items-center">
+          <!-- ICON COLUMN -->
+          <div class="col-auto">
+            <!-- Inline SVG icon -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"
+                 viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                 class="icon icon-tabler icon-tabler-file-type-pdf">
+              <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+              <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+              <path d="M5 12v-7a2 2 0 0 1 2 -2h7l5 5v4" />
+              <path d="M5 18h1.5a1.5 1.5 0 0 0 0 -3h-1.5v6" />
+              <path d="M17 18h2" />
+              <path d="M20 15h-3v6" />
+              <path d="M11 15v6h1a2 2 0 0 0 2 -2v-2a2 2 0 0 0 -2 -2h-1z" />
+            </svg>
+          </div>
+
+          <!-- TEXT/LINK COLUMN -->
+          <div class="col">
+            <strong>Combined PDF:</strong>
+            <br />
+            <a href="/static/${data.merged_pdf}" target="_blank">${data.merged_pdf}</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+          if (data.png_mapping && data.png_mapping.length > 0) {
+    html += `<div class="row row-cards">`;
+    data.png_mapping.forEach(mapping => {
+      // mapping.handlerName = the DisplayName
+      // mapping.pngFile = "handler_graph_images/<filename>.png"
+      html += `
+        <div class="col-sm-6 col-lg-4">
+          <div class="card mb-3">
+            <img src="/static/${mapping.pngFile}" class="card-img-top" alt="Call Handler Diagram">
+            <div class="card-body">
+              <h4 class="card-title">${mapping.handlerName}</h4>
+              <a href="/static/${mapping.pngFile}" download class="btn btn-primary">Download PNG</a>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    html += `</div>`; // end row-cards
+          }
+
+          resultsDiv.innerHTML = html;
+        })
+        .catch(err => {
+          console.error(err);
+          resultsDiv.innerHTML = `
+            <div class="alert alert-danger">
+              Failed to generate graphs: ${err}
+            </div>
+          `;
+        });
+    });
+  </script>
+</body>
+</html>

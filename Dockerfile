@@ -5,7 +5,7 @@ LABEL authors="ht-jmetcalf"
 WORKDIR /app
 
 # Install Git so we can clone the repo
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/* && apt-get install graphviz
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/* && apt-get install -y graphviz
 
 # Clone the repository directly into /app
 RUN git clone https://github.com/jmetdev/CUCCallHandlerDocumentationizer.git /app

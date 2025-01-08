@@ -1,6 +1,5 @@
-LABEL authors="ht-jmetcalf"
-# Use a small Python base image
 FROM python:3.11-slim
+LABEL authors="ht-jmetcalf"
 
 # Set the working directory
 WORKDIR /app
